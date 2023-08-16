@@ -10,7 +10,7 @@ use ggez::{
     conf::{WindowMode, WindowSetup},
     event,
     glam::*,
-    graphics::{self, Color, DrawParam, InstanceArray, Mesh, MeshData, Rect, Vertex},
+    graphics::{self, Color, DrawParam, InstanceArray, Mesh, MeshData, Quad, Rect, Vertex},
     mint::Point2,
     Context, GameResult,
 };
@@ -402,6 +402,10 @@ struct MainState {
     rotate_sfx: audio::Source,
     place_sfx: audio::Source,
     clear_sfx: audio::Source,
+    music: audio::Source,
+
+    bg: graphics::Image,
+    board_img: graphics::ScreenImage,
 
     piece_falling: Piece,
 
@@ -410,16 +414,20 @@ struct MainState {
 
 impl MainState {
     fn new(ctx: &mut Context) -> GameResult<MainState> {
-        let grid = Grid::new(10, 21);
+        let grid = Grid::new(10, 16);
 
-        let grid_batch = InstanceArray::new(ctx, None);
+        let grid_batch =
+            InstanceArray::new(ctx, graphics::Image::from_path(ctx, "/textures/block.png")?);
 
         let mut state = MainState {
             grid,
             grid_batch,
-            rotate_sfx: audio::Source::new(ctx, "/rotate.ogg")?,
-            place_sfx: audio::Source::new(ctx, "/place.ogg")?,
-            clear_sfx: audio::Source::new(ctx, "/clear.wav")?,
+            rotate_sfx: audio::Source::new(ctx, "/sound/rotate.ogg")?,
+            place_sfx: audio::Source::new(ctx, "/sound/place.ogg")?,
+            clear_sfx: audio::Source::new(ctx, "/sound/clear.wav")?,
+            music: audio::Source::new(ctx, "/music/game.mp3")?,
+            bg: graphics::Image::from_path(ctx, "/textures/game_bg.png")?,
+            board_img: graphics::ScreenImage::new(ctx, None, 10. / 400., 19. / 300., 1),
             quad_mesh: Mesh::from_data(
                 &ctx.gfx,
                 MeshData {
@@ -457,6 +465,7 @@ impl MainState {
             line_destroy_animations: None,
         };
 
+        state.music.play(ctx)?;
         state.update_grid_batch();
 
         Ok(state)
@@ -633,17 +642,12 @@ impl event::EventHandler<ggez::GameError> for MainState {
         let mut canvas =
             graphics::Canvas::from_frame(ctx, graphics::Color::from([0.1, 0.2, 0.3, 1.0]));
 
-        canvas.set_screen_coordinates(Rect::new(
-            0.,
-            1.,
-            self.grid.width() as f32,
-            self.grid.height() as f32 - 1.,
-        ));
+        canvas.draw(&self.bg, DrawParam::new());
 
         canvas.draw_instanced_mesh(
             self.quad_mesh.clone(),
             &self.grid_batch,
-            DrawParam::default(),
+            DrawParam::default().dest_rect(Rect::new(120., 16., 16., 16.)),
         );
         if let Some(anim) = &self.line_destroy_animations {
             for lines in &anim.lines_to_destroy {
@@ -651,10 +655,10 @@ impl event::EventHandler<ggez::GameError> for MainState {
                     canvas.draw(
                         &self.quad_mesh,
                         DrawParam::default().dest_rect(Rect::new(
-                            0.,
-                            line as f32,
-                            self.grid.width() as f32,
-                            1.,
+                            120.,
+                            16. + 16. * line as f32,
+                            self.grid.width() as f32 * 16.,
+                            16.,
                         )),
                     );
                 }
@@ -678,7 +682,7 @@ pub fn main() -> GameResult {
 
     let cb = ggez::ContextBuilder::new("tetris", "aleok")
         .window_setup(WindowSetup::default().title("Tetris"))
-        .window_mode(WindowMode::default().dimensions(200., 400.))
+        .window_mode(WindowMode::default().dimensions(400., 300.))
         .add_resource_path(resource_dir);
     let (mut ctx, event_loop) = cb.build()?;
     let state = MainState::new(&mut ctx)?;
