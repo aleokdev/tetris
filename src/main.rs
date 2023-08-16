@@ -5,6 +5,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crevice::std140::AsStd140;
+
 use ggez::{
     audio::{self, SoundSource},
     conf::{WindowMode, WindowSetup},
@@ -384,6 +386,11 @@ impl Grid {
     }
 }
 
+#[derive(AsStd140)]
+struct ShaderUniform {
+    time: f32,
+}
+
 pub struct LineDestroyAnimation {
     lines_to_destroy: Vec<Range<u32>>,
     // 0.0 to 1.0
@@ -406,6 +413,8 @@ struct MainState {
 
     bg: graphics::Image,
     board_img: graphics::ScreenImage,
+    bg_shader: graphics::Shader,
+    bg_shader_params: graphics::ShaderParams<ShaderUniform>,
 
     piece_falling: Piece,
 
@@ -419,6 +428,9 @@ impl MainState {
         let grid_batch =
             InstanceArray::new(ctx, graphics::Image::from_path(ctx, "/textures/block.png")?);
 
+        let bg_shader_params =
+            graphics::ShaderParamsBuilder::new(&ShaderUniform { time: 0. }).build(ctx);
+
         let mut state = MainState {
             grid,
             grid_batch,
@@ -427,6 +439,8 @@ impl MainState {
             clear_sfx: audio::Source::new(ctx, "/sound/clear.wav")?,
             music: audio::Source::new(ctx, "/music/game.mp3")?,
             bg: graphics::Image::from_path(ctx, "/textures/game_bg.png")?,
+            bg_shader: graphics::ShaderBuilder::from_path("/shaders/game_bg.wgsl").build(ctx)?,
+            bg_shader_params,
             board_img: graphics::ScreenImage::new(ctx, None, 10. / 400., 19. / 300., 1),
             quad_mesh: Mesh::from_data(
                 &ctx.gfx,
@@ -466,6 +480,7 @@ impl MainState {
         };
 
         state.music.play(ctx)?;
+        state.music.set_volume(0.); // Comment to enable music
         state.update_grid_batch();
 
         Ok(state)
@@ -635,6 +650,13 @@ impl event::EventHandler<ggez::GameError> for MainState {
                 self.update_grid_batch();
             }
         }
+        self.bg_shader_params.set_uniforms(
+            ctx,
+            &ShaderUniform {
+                time: ctx.time.time_since_start().as_secs_f32() / 10.,
+            },
+        );
+
         Ok(())
     }
 
@@ -642,6 +664,13 @@ impl event::EventHandler<ggez::GameError> for MainState {
         let mut canvas =
             graphics::Canvas::from_frame(ctx, graphics::Color::from([0.1, 0.2, 0.3, 1.0]));
 
+        canvas.set_shader(&self.bg_shader);
+        canvas.set_shader_params(&self.bg_shader_params);
+        canvas.draw(
+            &Quad,
+            DrawParam::new().dest_rect(Rect::new(0., 0., 400., 300.)),
+        );
+        canvas.set_default_shader();
         canvas.draw(&self.bg, DrawParam::new());
 
         canvas.draw_instanced_mesh(
