@@ -7,6 +7,7 @@ use std::{
 
 use crevice::std140::AsStd140;
 
+use enum_map::{enum_map, Enum, EnumMap};
 use ggez::{
     audio::{self, SoundSource},
     conf::{WindowMode, WindowSetup},
@@ -18,7 +19,7 @@ use ggez::{
 };
 use rand::thread_rng;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Enum)]
 pub enum PieceRotation {
     Deg0,
     Deg90,
@@ -47,7 +48,7 @@ impl PieceRotation {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Enum)]
 pub enum PieceKind {
     I,
     J,
@@ -412,9 +413,13 @@ struct MainState {
     music: audio::Source,
 
     bg: graphics::Image,
-    board_img: graphics::ScreenImage,
+    game_over_text: graphics::Image,
     bg_shader: graphics::Shader,
     bg_shader_params: graphics::ShaderParams<ShaderUniform>,
+
+    game_over: bool,
+
+    piece_meshes: EnumMap<PieceKind, EnumMap<PieceRotation, InstanceArray>>,
 
     piece_falling: Piece,
 
@@ -425,13 +430,15 @@ impl MainState {
     fn new(ctx: &mut Context) -> GameResult<MainState> {
         let grid = Grid::new(10, 16);
 
-        let grid_batch =
-            InstanceArray::new(ctx, graphics::Image::from_path(ctx, "/textures/block.png")?);
+        let block_texture = graphics::Image::from_path(ctx, "/textures/block.png")?;
+        let grid_batch = InstanceArray::new(ctx, block_texture.clone());
 
         let bg_shader_params =
             graphics::ShaderParamsBuilder::new(&ShaderUniform { time: 0. }).build(ctx);
 
         let mut state = MainState {
+            game_over: false,
+
             grid,
             grid_batch,
             rotate_sfx: audio::Source::new(ctx, "/sound/rotate.ogg")?,
@@ -439,9 +446,39 @@ impl MainState {
             clear_sfx: audio::Source::new(ctx, "/sound/clear.wav")?,
             music: audio::Source::new(ctx, "/music/game.mp3")?,
             bg: graphics::Image::from_path(ctx, "/textures/game_bg.png")?,
+            game_over_text: graphics::Image::from_path(ctx, "/textures/game_over.png")?,
             bg_shader: graphics::ShaderBuilder::from_path("/shaders/game_bg.wgsl").build(ctx)?,
             bg_shader_params,
-            board_img: graphics::ScreenImage::new(ctx, None, 10. / 400., 19. / 300., 1),
+            piece_meshes: {
+                use PieceKind::*;
+                use PieceRotation::*;
+                let generate_piece_mesh =
+                    |piece: PieceKind, rotation: PieceRotation| -> InstanceArray {
+                        let grid = piece.get_grid(rotation);
+                        let mut batch = InstanceArray::new(ctx, block_texture.clone());
+                        for x in 0..grid.width() {
+                            for y in 0..grid.height() {
+                                if let Some(block) = grid.at(x as i32, y as i32) {
+                                    batch.push(
+                                        DrawParam::new()
+                                            .dest(Point2 {
+                                                x: x as f32,
+                                                y: y as f32,
+                                            })
+                                            .color(block.color),
+                                    );
+                                }
+                            }
+                        }
+                        batch
+                    };
+                EnumMap::from_array([I, J, L, O, S, T, Z].map(|piece| {
+                    EnumMap::from_array(
+                        [Deg0, Deg90, Deg180, Deg270]
+                            .map(|rotation| generate_piece_mesh(piece, rotation)),
+                    )
+                }))
+            },
             quad_mesh: Mesh::from_data(
                 &ctx.gfx,
                 MeshData {
@@ -499,23 +536,6 @@ impl MainState {
                             })
                             .color(block.color),
                     );
-                } else if let Some(block) = self
-                    .piece_falling
-                    .kind
-                    .get_grid(self.piece_falling.rotation)
-                    .at(
-                        x as i32 - self.piece_falling.pos.x,
-                        y as i32 - self.piece_falling.pos.y,
-                    )
-                {
-                    self.grid_batch.push(
-                        DrawParam::new()
-                            .dest(Point2 {
-                                x: x as f32,
-                                y: y as f32,
-                            })
-                            .color(block.color),
-                    );
                 }
             }
         }
@@ -537,6 +557,9 @@ impl MainState {
             kind: PieceKind::random(&mut thread_rng()),
             rotation: PieceRotation::Deg0,
         };
+        if self.piece_falling.collides_with(&self.grid) {
+            self.game_over = true;
+        }
         let _ = self.place_sfx.play(ctx);
         self.check_lines(ctx);
     }
@@ -579,9 +602,7 @@ impl event::EventHandler<ggez::GameError> for MainState {
                 }
                 self.line_destroy_animations = None;
             }
-        } else {
-            let mut did_any_changes = false;
-
+        } else if !self.game_over {
             if ctx
                 .keyboard
                 .is_key_just_pressed(ggez::winit::event::VirtualKeyCode::Left)
@@ -589,8 +610,6 @@ impl event::EventHandler<ggez::GameError> for MainState {
                 self.piece_falling.pos.x -= 1;
                 if self.piece_falling.collides_with(&self.grid) {
                     self.piece_falling.pos.x += 1;
-                } else {
-                    did_any_changes = true;
                 }
             }
             if ctx
@@ -600,8 +619,6 @@ impl event::EventHandler<ggez::GameError> for MainState {
                 self.piece_falling.pos.x += 1;
                 if self.piece_falling.collides_with(&self.grid) {
                     self.piece_falling.pos.x -= 1;
-                } else {
-                    did_any_changes = true;
                 }
             }
             if ctx
@@ -613,7 +630,6 @@ impl event::EventHandler<ggez::GameError> for MainState {
                     self.piece_falling.rotation = self.piece_falling.rotation.rotate_ccw();
                 } else {
                     let _ = self.rotate_sfx.play(ctx);
-                    did_any_changes = true;
                 }
             }
             let time_per_fall = if ctx
@@ -634,7 +650,7 @@ impl event::EventHandler<ggez::GameError> for MainState {
                 }
                 self.piece_falling.pos.y -= 1;
                 self.place_current_piece(ctx);
-                did_any_changes = true;
+                self.update_grid_batch();
             }
             if std::time::Instant::now() > self.time_last_moved_piece + time_per_fall {
                 self.time_last_moved_piece = std::time::Instant::now();
@@ -642,14 +658,11 @@ impl event::EventHandler<ggez::GameError> for MainState {
                 if self.piece_falling.collides_with(&self.grid) {
                     self.piece_falling.pos.y -= 1;
                     self.place_current_piece(ctx);
+                    self.update_grid_batch();
                 }
-                did_any_changes = true;
-            }
-
-            if did_any_changes {
-                self.update_grid_batch();
             }
         }
+
         self.bg_shader_params.set_uniforms(
             ctx,
             &ShaderUniform {
@@ -678,6 +691,35 @@ impl event::EventHandler<ggez::GameError> for MainState {
             &self.grid_batch,
             DrawParam::default().dest_rect(Rect::new(120., 16., 16., 16.)),
         );
+        canvas.draw_instanced_mesh(
+            self.quad_mesh.clone(),
+            &self.piece_meshes[self.piece_falling.kind][self.piece_falling.rotation],
+            DrawParam::default().dest_rect(Rect::new(
+                120. + self.piece_falling.pos.x as f32 * 16.,
+                16. + self.piece_falling.pos.y as f32 * 16.,
+                16.,
+                16.,
+            )),
+        );
+
+        if self.game_over {
+            canvas.draw(
+                &Quad,
+                DrawParam::default()
+                    .dest_rect(Rect::new(
+                        120.,
+                        16.,
+                        self.grid.width() as f32 * 16.,
+                        self.grid.height() as f32 * 16.,
+                    ))
+                    .color(Color::new(0., 0., 0., 0.7)),
+            );
+            canvas.draw(
+                &self.game_over_text,
+                DrawParam::default().dest(Point2 { x: 120., y: 16. }),
+            );
+        }
+
         if let Some(anim) = &self.line_destroy_animations {
             for lines in &anim.lines_to_destroy {
                 for line in lines.clone() {

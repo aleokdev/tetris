@@ -95,10 +95,14 @@ fn correct(x: vec3<f32>) -> vec3<f32> {
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     var rgb: vec3<f32>;
-    if perlinNoise3(vec3(in.position.xy / 100., custom_data.time)) > 0.5 {
+    if perlinNoise3(vec3(in.position.xy / 100., custom_data.time)) > 0.3 {
         rgb = correct(vec3(0.72157, 0.38824, 0.05882));
     } else {
+    if perlinNoise3(vec3((in.position.xy - vec2(5., 5.)) / 100., custom_data.time)) > 0.3 {
+        rgb = correct(vec3(0.18431,  0.00000,  0.08235));
+    } else {
         rgb = correct(vec3(0.52941, 0.21176, 0.12941));
+    };
     };
     return vec4(rgb, in.color.a);
 }
