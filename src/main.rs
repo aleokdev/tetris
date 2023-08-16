@@ -601,7 +601,7 @@ impl event::EventHandler<ggez::GameError> for MainState {
                 Duration::from_millis(500)
             };
             if ctx
-                .keyboardw
+                .keyboard
                 .is_key_just_pressed(ggez::winit::event::VirtualKeyCode::Space)
             {
                 self.time_last_moved_piece = std::time::Instant::now();

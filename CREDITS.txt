@@ -1,3 +1,6 @@
 Sound files
 - place.ogg from https://freesound.org/people/BeezleFM/sounds/512138/ by BeezleFM
 - rotate.ogg based on https://freesound.org/people/WeakWero/sounds/584941/ by WeakWero
+
+Font
+- Big Apple 3PM by Caveras (https://caveras.net/)
